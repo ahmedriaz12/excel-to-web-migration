@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMA / EMA Analyzer</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e4e6f0;
+    --text-dim: #8b8fa3;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --input-bg: #23273a;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  .header .badge {
+    font-size: 11px;
+    background: var(--accent);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .controls {
+    display: flex;
+    gap: 16px;
+    padding: 20px 32px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .control-group label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .control-group input, .control-group select {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .control-group input:focus, .control-group select:focus {
+    border-color: var(--accent);
+  }
+
+  .toggle-group {
+    display: flex;
+    background: var(--input-bg);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .toggle-btn {
+    padding: 8px 20px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .toggle-btn.active {
+    background: var(--accent);
+    color: white;
+  }
+
+  .btn {
+    padding: 8px 24px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn:hover { background: var(--accent-hover); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-outline {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+
+  .btn-outline:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .content {
+    padding: 24px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    position: relative;
+    height: 420px;
+  }
+
+  .stats-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    flex: 1;
+    min-width: 160px;
+  }
+
+  .stat-card .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .stat-card .value {
+    font-size: 22px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .table-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .data-table thead th {
+    text-align: left;
+    padding: 10px 16px;
+    background: var(--input-bg);
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+  }
+
+  .data-table tbody td {
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .data-table tbody tr:hover {
+    background: rgba(99, 102, 241, 0.04);
+  }
+
+  .scroll-wrapper {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .loading {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 60px;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  .loading.show { display: flex; }
+
+  .spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    margin-right: 10px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-msg {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: var(--red);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+  }
+
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>SMA / EMA Analyzer</h1>
+  <span class="badge">v1.0</span>
+</div>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Ticker</label>
+    <input type="text" id="ticker" value="MMM" style="width:100px;" />
+  </div>
+  <div class="control-group">
+    <label>Start Date</label>
+    <input type="date" id="startDate" value="2016-01-01" />
+  </div>
+  <div class="control-group">
+    <label>Window (Days)</label>
+    <input type="number" id="window" value="10" min="2" max="500" style="width:80px;" />
+  </div>
+  <div class="control-group">
+    <label>Indicator</label>
+    <div class="toggle-group">
+      <button class="toggle-btn active" data-mode="SMA">SMA</button>
+      <button class="toggle-btn" data-mode="EMA">EMA</button>
+    </div>
+  </div>
+  <div class="control-group" style="justify-content:flex-end;">
+    <button class="btn" id="analyzeBtn">Analyze</button>
+  </div>
+  <div class="control-group" style="justify-content:flex-end;">
+    <button class="btn btn-outline" id="diffBtn">Download Diff Report</button>
+  </div>
+</div>
+
+<div class="content">
+  <div class="error-msg" id="errorMsg"></div>
+  <div class="loading" id="loading"><div class="spinner"></div>Fetching data...</div>
+
+  <div class="stats-row" id="statsRow" style="display:none;">
+    <div class="stat-card">
+      <div class="label">Ticker</div>
+      <div class="value" id="statTicker">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Latest Close</div>
+      <div class="value" id="statClose">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label" id="statIndicatorLabel">SMA(10)</div>
+      <div class="value" id="statIndicator">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Data Points</div>
+      <div class="value" id="statCount">—</div>
+    </div>
+  </div>
+
+  <div class="chart-container" id="chartContainer" style="display:none;">
+    <canvas id="priceChart"></canvas>
+  </div>
+
+  <div class="table-container" id="tableContainer" style="display:none;">
+    <div class="table-header">
+      <h3>Price Data</h3>
+      <button class="btn btn-outline" id="exportCsv" style="padding:4px 12px;font-size:12px;">Export CSV</button>
+    </div>
+    <div class="scroll-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Close</th>
+            <th id="thIndicator">SMA(10)</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let chartInstance = null;
+let currentData = null;
+
+const $  = id => document.getElementById(id);
+const mode = () => document.querySelector('.toggle-btn.active').dataset.mode;
+
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+$('analyzeBtn').addEventListener('click', analyze);
+$('diffBtn').addEventListener('click', downloadDiff);
+$('exportCsv').addEventListener('click', exportCsv);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') analyze();
+});
+
+async function analyze() {
+  const ticker = $('ticker').value.trim().toUpperCase();
+  const startDate = $('startDate').value;
+  const window = parseInt($('window').value);
+  const m = mode();
+
+  if (!ticker) return;
+
+  $('loading').classList.add('show');
+  $('errorMsg').classList.remove('show');
+  $('statsRow').style.display = 'none';
+  $('chartContainer').style.display = 'none';
+  $('tableContainer').style.display = 'none';
+
+  try {
+    const url = `/api/analyze?ticker=${ticker}&start_date=${startDate}&window=${window}&mode=${m}`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    if (json.error) throw new Error(json.error);
+
+    currentData = json;
+    renderStats(json);
+    renderChart(json);
+    renderTable(json);
+
+    $('statsRow').style.display = 'flex';
+    $('chartContainer').style.display = 'block';
+    $('tableContainer').style.display = 'block';
+  } catch (err) {
+    $('errorMsg').textContent = err.message;
+    $('errorMsg').classList.add('show');
+  } finally {
+    $('loading').classList.remove('show');
+  }
+}
+
+function renderStats(json) {
+  const data = json.data.filter(d => d.Indicator !== null);
+  const last = data[data.length - 1];
+  $('statTicker').textContent = json.ticker;
+  $('statClose').textContent = last ? last.Close.toFixed(2) : '—';
+  $('statIndicatorLabel').textContent = `${json.mode}(${json.window})`;
+  $('statIndicator').textContent = last ? last.Indicator.toFixed(2) : '—';
+  $('statCount').textContent = data.length.toLocaleString();
+}
+
+function renderChart(json) {
+  const data = json.data;
+  const dates = data.map(d => d.Date);
+  const closes = data.map(d => d.Close);
+  const indicators = data.map(d => d.Indicator);
+
+  if (chartInstance) chartInstance.destroy();
+
+  const ctx = $('priceChart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'Close',
+          data: closes,
+          borderColor: '#6366f1',
+          backgroundColor: 'rgba(99, 102, 241, 0.05)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.1,
+        },
+        {
+          label: `${json.mode}(${json.window})`,
+          data: indicators,
+          borderColor: '#f59e0b',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          borderDash: [4, 2],
+          tension: 0.1,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#8b8fa3', font: { size: 12 } }
+        },
+        tooltip: {
+          backgroundColor: '#1a1d27',
+          titleColor: '#e4e6f0',
+          bodyColor: '#e4e6f0',
+          borderColor: '#2a2d3a',
+          borderWidth: 1,
+        }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'month', tooltipFormat: 'yyyy-MM-dd' },
+          ticks: { color: '#8b8fa3', maxTicksLimit: 12 },
+          grid: { color: 'rgba(42,45,58,0.5)' }
+        },
+        y: {
+          ticks: { color: '#8b8fa3' },
+          grid: { color: 'rgba(42,45,58,0.5)' }
+        }
+      }
+    }
+  });
+}
+
+function renderTable(json) {
+  const label = `${json.mode}(${json.window})`;
+  $('thIndicator').textContent = label;
+
+  const rows = [...json.data].reverse();
+  const tbody = $('tableBody');
+  tbody.innerHTML = rows.map(d => `
+    <tr>
+      <td>${d.Date}</td>
+      <td>${d.Close != null ? d.Close.toFixed(2) : ''}</td>
+      <td>${d.Indicator != null ? d.Indicator.toFixed(4) : ''}</td>
+    </tr>
+  `).join('');
+}
+
+function downloadDiff() {
+  const window = parseInt($('window').value);
+  const a = document.createElement('a');
+  a.href = `/api/diff-report?window=${window}`;
+  a.download = `diff_report_SMA${window}.csv`;
+  a.click();
+}
+
+function exportCsv() {
+  if (!currentData) return;
+  const rows = [['Date', 'Close', currentData.data[0]?.Indicator_Label || 'Indicator']];
+  currentData.data.forEach(d => {
+    rows.push([d.Date, d.Close, d.Indicator ?? '']);
+  });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${currentData.ticker}_${currentData.mode}${currentData.window}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
