@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.data_provider import fetch_prices
-from app.engine import build_indicator_df, compute_sma
+from app.engine import build_indicator_df, compute_sma, compute_ema
 
 STATIC_DIR = Path(__file__).parent / "static"
 VALIDATION_CSV = Path(__file__).resolve().parent.parent / "validation_mmm_full.csv"
@@ -105,23 +105,23 @@ def _extract_excel_sma_data():
 
 @app.get("/api/diff-report")
 async def diff_report(
+    ticker: str = Query("MMM"),
+    start_date: str = Query("2016-01-01"),
     window: int = Query(10, ge=2, le=500),
+    mode: str = Query("SMA"),
 ):
-    # Compare Excel SMA vs Python SMA using the same closes. Any diff is in the math, not the data.
-    if not EXCEL_WORKBOOK.exists() and not VALIDATION_CSV.exists():
-        return JSONResponse({"error": "No baseline data found"}, status_code=404)
+    # When mode is SMA and ticker is MMM, compare against Excel baseline.
+    # For anything else, generate a standalone report with the computed values.
+    mode = mode.upper()
 
-    if EXCEL_WORKBOOK.exists():
+    if mode == "SMA" and ticker.upper() == "MMM" and EXCEL_WORKBOOK.exists():
         dates_desc, prices_desc, excel_sma_desc, excel_window = _extract_excel_sma_data()
 
-        # Excel is newest-first, flip to chronological for our engine
         dates_asc = list(reversed(dates_desc))
         prices_asc = list(reversed(prices_desc))
 
         close_series = pd.Series(prices_asc, dtype="float64")
         python_sma = compute_sma(close_series, excel_window)
-
-        # Flip back to descending so we can compare row by row with Excel
         python_sma_desc = list(reversed(python_sma.tolist()))
 
         rows = []
@@ -133,41 +133,59 @@ async def diff_report(
             diff = abs(excel_s - python_s)
             rows.append({
                 "Date": dates_desc[i],
-                "Excel_Close": prices_desc[i],
+                "Close": prices_desc[i],
                 "Excel_SMA": excel_s,
                 "Python_SMA": python_s,
                 "Diff": diff,
             })
 
         report = pd.DataFrame(rows)
+        max_diff = report["Diff"].abs().max() if len(report) else 0
+        mean_diff = report["Diff"].abs().mean() if len(report) else 0
+
+        buf = io.StringIO()
+        buf.write(f"# Parity Report - MMM SMA({excel_window}) vs Excel\n")
+        buf.write(f"# Max Abs Diff:  {max_diff:.2e}\n")
+        buf.write(f"# Mean Abs Diff: {mean_diff:.2e}\n")
+        buf.write(f"# Total Rows:    {len(report)}\n")
+        buf.write(f"# Status:        {'PASS' if max_diff < 1e-6 else 'INVESTIGATE'}\n")
+        buf.write("#\n")
+        report.to_csv(buf, index=False)
+
     else:
-        # No workbook? Use the exported CSV instead
-        excel_df = pd.read_csv(VALIDATION_CSV, parse_dates=["Date"])
-        excel_df = excel_df.sort_values("Date").reset_index(drop=True)
-        python_sma = compute_sma(excel_df["Close"].astype(float), window)
+        # For EMA or non-MMM tickers, pull live data and generate a report
+        try:
+            price_df = fetch_prices(ticker, start_date)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        close = price_df["Close"].astype(float)
+        if mode == "EMA":
+            indicator = compute_ema(close, window)
+        else:
+            indicator = compute_sma(close, window)
+
         report = pd.DataFrame({
-            "Date": excel_df["Date"].dt.strftime("%Y-%m-%d"),
-            "Excel_Close": excel_df["Close"],
-            "Excel_SMA": python_sma,
-            "Python_SMA": python_sma,
-            "Diff": 0.0,
-        }).dropna(subset=["Python_SMA"])
+            "Date": price_df["Date"].dt.strftime("%Y-%m-%d"),
+            "Close": close.values,
+            f"{mode}({window})": indicator.values,
+        }).dropna(subset=[f"{mode}({window})"])
 
-    max_diff = report["Diff"].abs().max() if len(report) else 0
-    mean_diff = report["Diff"].abs().mean() if len(report) else 0
+        buf = io.StringIO()
+        buf.write(f"# {ticker.upper()} {mode}({window}) Report\n")
+        buf.write(f"# Data points: {len(report)}\n")
+        buf.write(f"# Date range:  {report['Date'].iloc[0]} to {report['Date'].iloc[-1]}\n")
+        if mode == "EMA":
+            buf.write(f"# Smoothing k: {2.0/(window+1):.6f}\n")
+            buf.write(f"# Seed method: SMA of first {window} closes\n")
+        buf.write("#\n")
+        report.to_csv(buf, index=False)
 
-    buf = io.StringIO()
-    buf.write(f"# Parity Diff Report - MMM SMA({window})\n")
-    buf.write(f"# Max Abs Diff:  {max_diff:.2e}\n")
-    buf.write(f"# Mean Abs Diff: {mean_diff:.2e}\n")
-    buf.write(f"# Total Rows:    {len(report)}\n")
-    buf.write(f"# Status:        {'PASS' if max_diff < 1e-6 else 'INVESTIGATE'}\n")
-    buf.write("#\n")
-    report.to_csv(buf, index=False)
     buf.seek(0)
+    filename = f"{ticker.upper()}_{mode}{window}_report.csv"
 
     return StreamingResponse(
         buf,
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=diff_report_SMA{window}.csv"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
